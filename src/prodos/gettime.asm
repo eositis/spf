@@ -26,6 +26,8 @@ InitTime:
 	bcc FoundClockNoSlot
 	jsr CheckForROMX
 	bcc FoundClockROMX
+	jsr CheckForMegaFlash
+	bcc FoundClockMegaFlash
 	jsr CheckForSlottedClocks
 	rts
 
@@ -56,6 +58,16 @@ FoundClockROMX:
 	lda #<GetTimeROMX
 	sta GetTime+1
 	lda #>GetTimeROMX
+	sta GetTime+2
+	rts
+
+FoundClockMegaFlash:
+;---------------------------------------------------------
+; Patch the entry point of GetTime to the MegaFlash version
+;---------------------------------------------------------
+	lda #<GetTimeMegaFlash
+	sta GetTime+1
+	lda #>GetTimeMegaFlash
 	sta GetTime+2
 	rts
 
@@ -175,6 +187,122 @@ GetTimeROMX:
 	lda #$00	; Hundredths (not available on ROMX)
 	sta TimeNow+3
 	rts
+
+;---------------------------------------------------------
+; MegaFlash clock support (Apple IIc/IIc+ with MegaFlash)
+; https://github.com/ThomasFok/MegaFlash
+;
+; Design notes: doc/MegaFlash_Clock.md
+;
+; Detection: Magic sequence ($C0C2,$C0C0,$C0C0,$C0C3,$C0C1) activates
+; device. CMD_GETDEVINFO returns signature $88,$74 in paramreg.
+;
+; GetTime: CMD_GETPRODOS25TIME returns 6 bytes. Time word (bytes 2-3)
+; packs [mday:5][hour:5][min:6]; we extract hour=(time>>6)&$1F,
+; min=time&$3F. Byte 1 = seconds.
+;---------------------------------------------------------
+MF_CMDSTATUS	= $C0C0
+MF_PARAM	= $C0C1
+MF_DATA		= $C0C2
+MF_ID		= $C0C3
+MF_CMD_GETDEVINFO	= $10
+MF_CMD_GETPRODOS25TIME	= $18
+MF_SIGNATURE1	= $88
+MF_SIGNATURE2	= $74
+MF_BUSY		= $80
+
+CheckForMegaFlash:
+	; Activate MegaFlash with magic address sequence
+	lda MF_DATA
+	lda MF_CMDSTATUS
+	lda MF_CMDSTATUS
+	lda MF_ID
+	lda MF_PARAM
+	; Short delay for mode switch (~8us)
+	jsr MFShortDelay
+	; Send GETDEVINFO command
+	lda #MF_CMD_GETDEVINFO
+	sta MF_CMDSTATUS
+	; Wait for busy to clear (with timeout)
+	ldx #100
+:	bit MF_CMDSTATUS
+	bpl :+
+	dex
+	bne :-
+	; Timeout - MegaFlash not present
+	sec
+	rts
+:	; Check for error (bit 6)
+	bvs CheckMegaFlashFail
+	; Verify signature bytes
+	lda MF_PARAM
+	cmp #MF_SIGNATURE1
+	bne CheckMegaFlashFail
+	lda MF_PARAM
+	cmp #MF_SIGNATURE2
+	bne CheckMegaFlashFail
+	; MegaFlash found
+	clc
+	rts
+CheckMegaFlashFail:
+	sec
+	rts
+
+MFShortDelay:
+	jsr :+
+:	rts
+
+GetTimeMegaFlash:
+	; Activate MegaFlash
+	lda MF_DATA
+	lda MF_CMDSTATUS
+	lda MF_CMDSTATUS
+	lda MF_ID
+	lda MF_PARAM
+	jsr MFShortDelay
+	; Request ProDOS 2.5 format time (includes seconds)
+	lda #MF_CMD_GETPRODOS25TIME
+	sta MF_CMDSTATUS
+	; Wait for completion
+:	bit MF_CMDSTATUS
+	bmi :-
+	bvs GetTimeMFDone	; Error - skip update
+	; Read 6 bytes: [0]=4ms units, [1]=sec, [2-3]=time word, [4-5]=date
+	lda MF_PARAM		; t4ms - discard
+	lda MF_PARAM		; seconds
+	sta MFTime+1
+	lda MF_PARAM		; time lo
+	sta MFTime+2
+	lda MF_PARAM		; time hi
+	sta MFTime+3
+	lda MF_PARAM		; date lo - discard
+	lda MF_PARAM		; date hi - discard
+	; Extract: min = time & $3F, hour = (time >> 6) & $1F
+	lda MFTime+2
+	and #$3F
+	sta TimeNow+1		; Minutes
+	lda MFTime+2
+	lsr a
+	lsr a
+	lsr a
+	lsr a
+	lsr a
+	lsr a
+	sta MFTime+0		; temp: hour low 2 bits
+	lda MFTime+3
+	and #$07			; hour bits from high byte
+	asl a
+	asl a
+	ora MFTime+0
+	sta TimeNow		; Hours
+	lda MFTime+1
+	sta TimeNow+2		; Seconds
+	lda #$00
+	sta TimeNow+3		; Hundredths (MegaFlash has 4ms, we use 0 for simplicity)
+GetTimeMFDone:
+	rts
+
+MFTime:	.res 4		; Temp: [0]=hour bits, [1]=sec, [2]=time_lo, [3]=time_hi
 
 CheckForNoSlotClock:
 	jsr PrepNoSlotClock	; Prepare the driver
