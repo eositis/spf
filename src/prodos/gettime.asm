@@ -194,8 +194,8 @@ GetTimeROMX:
 ;
 ; Design notes: doc/MegaFlash_Clock.md
 ;
-; Detection: Magic sequence ($C0C2,$C0C0,$C0C0,$C0C3,$C0C1) activates
-; device. CMD_GETDEVINFO returns signature $88,$74 in paramreg.
+; Activation is handled in MegaFlash ROM; we only check presence and read time.
+; Detection: CMD_GETDEVINFO returns signature $88,$74 in paramreg.
 ;
 ; GetTime: CMD_GETPRODOS25TIME returns 6 bytes. Time word (bytes 2-3)
 ; packs [mday:5][hour:5][min:6]; we extract hour=(time>>6)&$1F,
@@ -203,23 +203,13 @@ GetTimeROMX:
 ;---------------------------------------------------------
 MF_CMDSTATUS	= $C0C0
 MF_PARAM	= $C0C1
-MF_DATA		= $C0C2
-MF_ID		= $C0C3
 MF_CMD_GETDEVINFO	= $10
 MF_CMD_GETPRODOS25TIME	= $18
 MF_SIGNATURE1	= $88
 MF_SIGNATURE2	= $74
-MF_BUSY		= $80
 
 CheckForMegaFlash:
-	; Activate MegaFlash with magic address sequence
-	lda MF_DATA
-	lda MF_CMDSTATUS
-	lda MF_CMDSTATUS
-	lda MF_ID
-	lda MF_PARAM
-	; Short delay for mode switch (~8us)
-	jsr MFShortDelay
+	; ROM activates MegaFlash if present; just check for presence
 	; Send GETDEVINFO command
 	lda #MF_CMD_GETDEVINFO
 	sta MF_CMDSTATUS
@@ -248,18 +238,7 @@ CheckMegaFlashFail:
 	sec
 	rts
 
-MFShortDelay:
-	jsr :+
-:	rts
-
 GetTimeMegaFlash:
-	; Activate MegaFlash
-	lda MF_DATA
-	lda MF_CMDSTATUS
-	lda MF_CMDSTATUS
-	lda MF_ID
-	lda MF_PARAM
-	jsr MFShortDelay
 	; Request ProDOS 2.5 format time (includes seconds)
 	lda #MF_CMD_GETPRODOS25TIME
 	sta MF_CMDSTATUS

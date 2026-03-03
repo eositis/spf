@@ -15,11 +15,10 @@ SPF's benchmark feature requires second-resolution timing. The standard ProDOS c
 
 1. **Identification**: MegaFlash was identified from the GitHub repo. The README lists "Real Time Clock with ProDOS clock driver" as a feature.
 
-2. **Architecture**: MegaFlash is IIc/IIc+ only—it replaces the system ROM. Unlike slot-based cards (Thunderclock), it uses fixed I/O addresses $C0C0-$C0C3. These are in the IIc's peripheral space; on IIe/IIgs without MegaFlash, reads here hit other hardware or random values—our detection will correctly fail.
+2. **Architecture**: MegaFlash is IIc/IIc+ only—it replaces the system ROM. Unlike slot-based cards (Thunderclock), it uses fixed I/O addresses $C0C0-$C0C3. Activation is handled in MegaFlash ROM; SPF does not perform the magic address sequence—it only checks for presence and reads the time.
 
 3. **API Discovery**: From `common/defines.inc` and `firmware/megaflash.s`:
    - I/O: `cmdreg`/`statusreg`=$C0C0, `paramreg`=$C0C1, `datareg`=$C0C2, `idreg`=$C0C3
-   - Magic sequence to activate: read $C0C2, $C0C0, $C0C0, $C0C3, $C0C1 (in order)
    - `CMD_GETDEVINFO` ($10) returns signature bytes $88, $74 in paramreg for detection
    - `CMD_GETPRODOS25TIME` ($18) returns 6-byte ProDOS 2.5 timestamp (includes seconds)
 
@@ -72,6 +71,5 @@ If MegaFlash's RTC has never been set (no NTP, no manual set), the firmware retu
 
 ## Implementation Notes
 
-- **MFShortDelay**: A minimal JSR/RTS pair adds ~18–30 cycles. MegaFlash firmware specifies ~8µs for mode switch; this is adequate at 1–4 MHz.
 - **MFTime buffer**: 4 bytes for temp storage during extraction. [0] holds intermediate hour bits, [1]=sec, [2–3]=time word.
-- **Activation**: The magic sequence must be performed before each command. GetTimeMegaFlash runs it every call since there may be long gaps between invocations.
+- **Activation**: Handled in MegaFlash ROM; SPF does not perform the magic address sequence.
